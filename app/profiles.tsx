@@ -17,7 +17,61 @@ export default function ProfilesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { profiles, isLoading } = useProfiles();
-  const { isPremium, limits, canCreateProfile, upgradeToPremium } = useSubscription();
+  const {
+    isPremium,
+    limits,
+    canCreateProfile,
+    purchaseSubscription,
+    restoreSubscription,
+    subscription,
+    iapState,
+  } = useSubscription();
+
+  const statusLabels: Record<string, string> = {
+    inactive: "Kein aktives Abo",
+    pending: "Kauf wird geprüft",
+    active: "Premium aktiv",
+    restored: "Premium wiederhergestellt",
+    failed: "Letzter Kauf fehlgeschlagen",
+    expired: "Abo abgelaufen",
+    canceled: "Abo beendet",
+  };
+
+  const statusText = iapState.lastError
+    ? `Fehler: ${iapState.lastError}`
+    : iapState.lastMessage || statusLabels[subscription.status] || "Status unbekannt";
+  const isPurchaseBusy =
+    iapState.purchase === "pending" || iapState.verification === "pending";
+  const isRestoreBusy = iapState.restore === "pending";
+
+  const startPurchaseFlow = () => {
+    purchaseSubscription().catch((error) => {
+      Alert.alert(
+        "Kauf fehlgeschlagen",
+        error instanceof Error ? error.message : "Unbekannter Fehler"
+      );
+    });
+  };
+
+  const startRestoreFlow = () => {
+    restoreSubscription().catch((error) => {
+      Alert.alert(
+        "Wiederherstellung fehlgeschlagen",
+        error instanceof Error ? error.message : "Unbekannter Fehler"
+      );
+    });
+  };
+
+  const showPremiumBenefits = () => {
+    Alert.alert(
+      "Premium für 4,99€/Monat",
+      "Vorteile:\n• Bis zu 10 Profile\n• Unbegrenzte Nachrichten\n• 20 Bilder pro Profil täglich",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        { text: "Jetzt kaufen", onPress: startPurchaseFlow },
+      ]
+    );
+  };
 
   if (isLoading) {
     return (
@@ -38,16 +92,7 @@ export default function ProfilesScreen() {
           { text: "Abbrechen", style: "cancel" },
           {
             text: "Premium kaufen",
-            onPress: () => {
-              Alert.alert(
-                "Premium für 4,99€/Monat",
-                "Vorteile:\n• Bis zu 10 Profile\n• Unbegrenzte Nachrichten\n• 20 Bilder pro Profil täglich",
-                [
-                  { text: "Abbrechen", style: "cancel" },
-                  { text: "Jetzt kaufen", onPress: upgradeToPremium },
-                ]
-              );
-            },
+            onPress: showPremiumBenefits,
           },
         ]
       );
@@ -78,28 +123,39 @@ export default function ProfilesScreen() {
       <View style={styles.content}>
         {!isPremium && (
           <View style={styles.premiumBanner}>
-            <Crown size={24} color="#FFD700" strokeWidth={2} />
-            <View style={styles.premiumBannerContent}>
-              <Text style={styles.premiumBannerTitle}>Upgrade zu Premium</Text>
-              <Text style={styles.premiumBannerSubtitle}>
-                Nur 4,99€/Monat für unbegrenzte Möglichkeiten
-              </Text>
+            <View style={styles.premiumBannerHeader}>
+              <Crown size={24} color="#FFD700" strokeWidth={2} />
+              <View style={styles.premiumBannerContent}>
+                <Text style={styles.premiumBannerTitle}>Upgrade zu Premium</Text>
+                <Text style={styles.premiumBannerSubtitle}>
+                  Nur 4,99€/Monat für unbegrenzte Möglichkeiten
+                </Text>
+                <Text style={styles.premiumBannerStatus}>{statusText}</Text>
+              </View>
             </View>
-            <TouchableOpacity
-              style={styles.premiumBannerButton}
-              onPress={() => {
-                Alert.alert(
-                  "Premium für 4,99€/Monat",
-                  "Vorteile:\n• Bis zu 10 Profile\n• Unbegrenzte Nachrichten\n• 20 Bilder pro Profil täglich",
-                  [
-                    { text: "Abbrechen", style: "cancel" },
-                    { text: "Jetzt kaufen", onPress: upgradeToPremium },
-                  ]
-                );
-              }}
-            >
-              <Text style={styles.premiumBannerButtonText}>Info</Text>
-            </TouchableOpacity>
+            <View style={styles.premiumBannerActions}>
+              <TouchableOpacity
+                style={[
+                  styles.premiumBannerButton,
+                  (isPurchaseBusy || isRestoreBusy) && styles.premiumBannerButtonDisabled,
+                ]}
+                disabled={isPurchaseBusy || isRestoreBusy}
+                onPress={showPremiumBenefits}
+              >
+                <Text style={styles.premiumBannerButtonText}>
+                  {isPurchaseBusy ? "Wird geprüft..." : "Premium kaufen"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.premiumBannerSecondaryButton}
+                onPress={startRestoreFlow}
+                disabled={isRestoreBusy}
+              >
+                <Text style={styles.premiumBannerSecondaryText}>
+                  {isRestoreBusy ? "Lädt..." : "Wiederherstellen"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -325,14 +381,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   premiumBanner: {
-    flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "#1A1A1A",
     marginHorizontal: 24,
     marginTop: 20,
     marginBottom: 12,
     padding: 16,
     borderRadius: 16,
+    gap: 16,
+  },
+  premiumBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   premiumBannerContent: {
@@ -348,15 +407,42 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#AAAAAA",
   },
+  premiumBannerStatus: {
+    fontSize: 12,
+    color: "#D1D1D6",
+  },
+  premiumBannerActions: {
+    flexDirection: "row",
+    gap: 12,
+  },
   premiumBannerButton: {
+    flex: 1,
     backgroundColor: "#FFD700",
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderRadius: 12,
+    alignItems: "center",
+  },
+  premiumBannerButtonDisabled: {
+    opacity: 0.6,
   },
   premiumBannerButtonText: {
     fontSize: 14,
     fontWeight: "600",
     color: "#1A1A1A",
+  },
+  premiumBannerSecondaryButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#FFD700",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  premiumBannerSecondaryText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#FFD700",
   },
 });
