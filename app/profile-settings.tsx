@@ -24,8 +24,57 @@ export default function ProfileSettingsScreen() {
     limits,
     getRemainingMessages,
     getRemainingImages,
-    upgradeToPremium,
+    purchaseSubscription,
+    restoreSubscription,
+    subscription,
+    iapState,
   } = useSubscription();
+
+  const statusLabels: Record<string, string> = {
+    inactive: "Kein aktives Abo",
+    pending: "Kauf wird geprüft",
+    active: "Premium aktiv",
+    restored: "Premium wiederhergestellt",
+    failed: "Letzter Kauf fehlgeschlagen",
+    expired: "Abo abgelaufen",
+    canceled: "Abo beendet",
+  };
+
+  const statusText = iapState.lastError
+    ? `Fehler: ${iapState.lastError}`
+    : iapState.lastMessage || statusLabels[subscription.status] || "Status unbekannt";
+  const isPurchaseBusy =
+    iapState.purchase === "pending" || iapState.verification === "pending";
+  const isRestoreBusy = iapState.restore === "pending";
+
+  const startPurchaseFlow = () => {
+    purchaseSubscription().catch((error) => {
+      Alert.alert(
+        "Kauf fehlgeschlagen",
+        error instanceof Error ? error.message : "Unbekannter Fehler"
+      );
+    });
+  };
+
+  const startRestoreFlow = () => {
+    restoreSubscription().catch((error) => {
+      Alert.alert(
+        "Wiederherstellung fehlgeschlagen",
+        error instanceof Error ? error.message : "Unbekannter Fehler"
+      );
+    });
+  };
+
+  const showPremiumBenefits = () => {
+    Alert.alert(
+      "Premium für 4,99€/Monat",
+      "Vorteile:\n• Bis zu 10 Profile\n• Unbegrenzte Nachrichten\n• 20 Bilder pro Profil täglich",
+      [
+        { text: "Abbrechen", style: "cancel" },
+        { text: "Jetzt kaufen", onPress: startPurchaseFlow },
+      ]
+    );
+  };
 
   const profile = profiles.find((p) => p.id === id);
 
@@ -184,6 +233,13 @@ export default function ProfileSettingsScreen() {
             {isPremium && <Crown size={24} color="#FFD700" strokeWidth={2} />}
           </View>
 
+          <View style={styles.subscriptionStatusRow}>
+            <Text style={styles.subscriptionStatusLabel}>Status</Text>
+            <View style={styles.subscriptionStatusBadge}>
+              <Text style={styles.subscriptionStatusText}>{statusText}</Text>
+            </View>
+          </View>
+
           <View style={styles.limitsContainer}>
             <View style={styles.limitItem}>
               <View style={styles.limitIconContainer}>
@@ -226,22 +282,26 @@ export default function ProfileSettingsScreen() {
 
           {!isPremium && (
             <TouchableOpacity
-              style={styles.upgradeButton}
-              onPress={() => {
-                Alert.alert(
-                  "Premium für 4,99€/Monat",
-                  "Vorteile:\n• Bis zu 10 Profile\n• Unbegrenzte Nachrichten\n• 20 Bilder pro Profil täglich",
-                  [
-                    { text: "Abbrechen", style: "cancel" },
-                    { text: "Jetzt kaufen", onPress: upgradeToPremium },
-                  ]
-                );
-              }}
+              style={[styles.upgradeButton, isPurchaseBusy && styles.upgradeButtonDisabled]}
+              onPress={showPremiumBenefits}
+              disabled={isPurchaseBusy}
             >
               <Crown size={20} color="#FFD700" strokeWidth={2} />
-              <Text style={styles.upgradeButtonText}>Auf Premium upgraden</Text>
+              <Text style={styles.upgradeButtonText}>
+                {isPurchaseBusy ? "Kauf läuft..." : "Auf Premium upgraden"}
+              </Text>
             </TouchableOpacity>
           )}
+
+          <TouchableOpacity
+            style={[styles.restoreButton, isRestoreBusy && styles.restoreButtonDisabled]}
+            onPress={startRestoreFlow}
+            disabled={isRestoreBusy}
+          >
+            <Text style={styles.restoreButtonText}>
+              {isRestoreBusy ? "Wird geprüft..." : "Kauf wiederherstellen"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity
@@ -415,6 +475,27 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#1A1A1A",
   },
+  subscriptionStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 24,
+  },
+  subscriptionStatusLabel: {
+    fontSize: 14,
+    color: "#666666",
+  },
+  subscriptionStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: "#FFF5E6",
+  },
+  subscriptionStatusText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#FF9500",
+  },
   limitsContainer: {
     gap: 16,
     marginBottom: 24,
@@ -459,9 +540,28 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
+  upgradeButtonDisabled: {
+    opacity: 0.6,
+  },
   upgradeButtonText: {
     fontSize: 18,
     fontWeight: "600",
     color: "#FFFFFF",
+  },
+  restoreButton: {
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FF9500",
+    alignItems: "center",
+  },
+  restoreButtonDisabled: {
+    opacity: 0.6,
+  },
+  restoreButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FF9500",
   },
 });

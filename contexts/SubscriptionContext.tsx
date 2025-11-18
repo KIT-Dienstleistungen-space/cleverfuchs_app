@@ -1,53 +1,73 @@
 import createContextHook from "@nkzw/create-context-hook";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState, useCallback, useMemo } from "react";
-
-export type SubscriptionTier = "free" | "premium";
-
-export interface SubscriptionLimits {
-  maxProfiles: number;
-  maxMessagesPerDay: number;
-  maxImagesPerProfilePerDay: number;
-}
-
-export interface UsageStats {
-  messagesToday: number;
-  imagesUploadedToday: { [profileId: string]: number };
-  lastResetDate: string;
-}
-
-export interface Subscription {
-  tier: SubscriptionTier;
-  expiresAt?: number;
-}
+import {
+  SubscriptionInfo,
+  SubscriptionTier,
+  UsageStats,
+} from "@/types/subscription";
+import { getLimitsForTier } from "@/lib/subscription/limits";
+import {
+  canCreateProfileWithLimits,
+  canSendMessageWithStats,
+  canUploadImageWithStats,
+  getRemainingImagesFromStats,
+  getRemainingMessagesFromStats,
+  incrementImageUsage,
+  incrementMessageUsage,
+  normalizeUsageStats,
+} from "@/lib/subscription/usage";
+import {
+  subscriptionPurchaseService,
+  type NormalizedPurchase,
+} from "@/lib/subscription/iap";
 
 const SUBSCRIPTION_KEY = "subscription";
 const USAGE_STATS_KEY = "usage_stats";
 
-const FREE_LIMITS: SubscriptionLimits = {
-  maxProfiles: 1,
-  maxMessagesPerDay: 20,
-  maxImagesPerProfilePerDay: 5,
-};
+type AsyncState = "idle" | "pending" | "success" | "failed";
 
-const PREMIUM_LIMITS: SubscriptionLimits = {
-  maxProfiles: 10,
-  maxMessagesPerDay: Infinity,
-  maxImagesPerProfilePerDay: 20,
+interface SubscriptionApiState {
+  purchase: AsyncState;
+  restore: AsyncState;
+  verification: AsyncState;
+  lastMessage?: string;
+  lastError?: string;
+}
+
+const defaultSubscription: SubscriptionInfo = {
+  tier: "free",
+  status: "inactive",
 };
 
 export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
-  const [subscription, setSubscription] = useState<Subscription>({ tier: "free" });
+  const [subscription, setSubscription] = useState<SubscriptionInfo>(
+    defaultSubscription
+  );
   const [usageStats, setUsageStats] = useState<UsageStats>({
     messagesToday: 0,
     imagesUploadedToday: {},
     lastResetDate: new Date().toDateString(),
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [iapState, setIapState] = useState<SubscriptionApiState>({
+    purchase: "idle",
+    restore: "idle",
+    verification: "idle",
+  });
+
+  const hasActiveSubscription =
+    subscription.tier === "premium" &&
+    (subscription.status === "active" || subscription.status === "restored") &&
+    (!subscription.expiresAt || subscription.expiresAt > Date.now());
+
+  const tierForLimits: SubscriptionTier = hasActiveSubscription
+    ? "premium"
+    : "free";
 
   const limits = useMemo(
-    () => (subscription.tier === "premium" ? PREMIUM_LIMITS : FREE_LIMITS),
-    [subscription.tier]
+    () => getLimitsForTier(tierForLimits),
+    [tierForLimits]
   );
 
   const saveSubscription = useCallback(async () => {
@@ -75,11 +95,28 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
         ]);
 
         if (subData) {
-          const parsed: Subscription = JSON.parse(subData);
-          if (parsed.tier === "premium" && parsed.expiresAt && parsed.expiresAt < Date.now()) {
-            setSubscription({ tier: "free" });
+          const parsed: SubscriptionInfo = JSON.parse(subData);
+          const status: SubscriptionInfo["status"] = parsed.status
+            ? parsed.status
+            : parsed.tier === "premium"
+            ? "active"
+            : "inactive";
+          const nextValue: SubscriptionInfo = {
+            ...parsed,
+            status,
+          };
+          if (
+            nextValue.tier === "premium" &&
+            nextValue.expiresAt &&
+            nextValue.expiresAt < Date.now()
+          ) {
+            setSubscription({
+              tier: "free",
+              status: "expired",
+              expiresAt: nextValue.expiresAt,
+            });
           } else {
-            setSubscription(parsed);
+            setSubscription(nextValue);
           }
         }
 
@@ -119,92 +156,225 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     }
   }, [usageStats, isLoading, saveUsageStats]);
 
-  const resetDailyUsageIfNeeded = useCallback(() => {
-    const today = new Date().toDateString();
-    if (usageStats.lastResetDate !== today) {
-      setUsageStats({
-        messagesToday: 0,
-        imagesUploadedToday: {},
-        lastResetDate: today,
-      });
+  const ensureFreshUsageStats = useCallback((): UsageStats => {
+    const normalized = normalizeUsageStats(usageStats);
+    if (normalized !== usageStats) {
+      setUsageStats(normalized);
+      return normalized;
     }
-  }, [usageStats.lastResetDate]);
+    return usageStats;
+  }, [usageStats]);
 
   useEffect(() => {
-    resetDailyUsageIfNeeded();
-  }, [resetDailyUsageIfNeeded]);
+    setUsageStats((prev) => normalizeUsageStats(prev));
+  }, []);
 
   const canSendMessage = useCallback((): boolean => {
-    resetDailyUsageIfNeeded();
-    return usageStats.messagesToday < limits.maxMessagesPerDay;
-  }, [usageStats.messagesToday, limits.maxMessagesPerDay, resetDailyUsageIfNeeded]);
+    const fresh = ensureFreshUsageStats();
+    return canSendMessageWithStats(fresh, limits);
+  }, [ensureFreshUsageStats, limits]);
 
   const canUploadImage = useCallback((profileId: string): boolean => {
-    resetDailyUsageIfNeeded();
-    const profileImages = usageStats.imagesUploadedToday[profileId] || 0;
-    return profileImages < limits.maxImagesPerProfilePerDay;
-  }, [usageStats.imagesUploadedToday, limits.maxImagesPerProfilePerDay, resetDailyUsageIfNeeded]);
+    const fresh = ensureFreshUsageStats();
+    return canUploadImageWithStats(fresh, limits, profileId);
+  }, [ensureFreshUsageStats, limits]);
 
   const canCreateProfile = useCallback((currentProfileCount: number): boolean => {
-    return currentProfileCount < limits.maxProfiles;
+    return canCreateProfileWithLimits(limits, currentProfileCount);
   }, [limits.maxProfiles]);
 
   const incrementMessageCount = useCallback(() => {
-    resetDailyUsageIfNeeded();
-    setUsageStats((prev) => ({
-      ...prev,
-      messagesToday: prev.messagesToday + 1,
-    }));
-  }, [resetDailyUsageIfNeeded]);
+    setUsageStats((prev) => incrementMessageUsage(normalizeUsageStats(prev)));
+  }, []);
 
   const incrementImageCount = useCallback((profileId: string) => {
-    resetDailyUsageIfNeeded();
-    setUsageStats((prev) => ({
+    setUsageStats((prev) => incrementImageUsage(normalizeUsageStats(prev), profileId));
+  }, []);
+
+  const handleVerification = useCallback(
+    async (purchase: NormalizedPurchase, mode: "purchase" | "restore") => {
+      setIapState((prev) => ({
+        ...prev,
+        verification: "pending",
+        lastError: undefined,
+      }));
+
+      try {
+        const response = await subscriptionPurchaseService.verifyPurchaseWithBackend(
+          purchase
+        );
+        const verified = response.subscription ?? defaultSubscription;
+        setSubscription({
+          ...verified,
+          status: verified.status ?? (mode === "restore" ? "restored" : "active"),
+        });
+        setIapState((prev) => ({
+          ...prev,
+          verification: "success",
+          lastMessage:
+            mode === "restore"
+              ? "Abo wiederhergestellt"
+              : response.message || "Abo verifiziert",
+        }));
+      } catch (error) {
+        setSubscription({ tier: "free", status: "failed" });
+        setIapState((prev) => ({
+          ...prev,
+          verification: "failed",
+          lastError: error instanceof Error ? error.message : String(error),
+        }));
+        throw error;
+      }
+    },
+    []
+  );
+
+  const purchaseSubscription = useCallback(async () => {
+    setIapState((prev) => ({
       ...prev,
-      imagesUploadedToday: {
-        ...prev.imagesUploadedToday,
-        [profileId]: (prev.imagesUploadedToday[profileId] || 0) + 1,
-      },
+      purchase: "pending",
+      lastError: undefined,
+      lastMessage: "Kauf wird gestartet...",
     }));
-  }, [resetDailyUsageIfNeeded]);
+    try {
+      const purchase = await subscriptionPurchaseService.purchaseSubscription();
+      setSubscription((prev) => ({
+        ...prev,
+        tier: "premium",
+        status: "pending",
+      }));
+      setIapState((prev) => ({
+        ...prev,
+        purchase: "success",
+        lastMessage: "Beleg empfangen",
+      }));
+      await handleVerification(purchase, "purchase");
+    } catch (error) {
+      setSubscription({ tier: "free", status: "failed" });
+      setIapState((prev) => ({
+        ...prev,
+        purchase: "failed",
+        lastError: error instanceof Error ? error.message : String(error),
+      }));
+      throw error;
+    }
+  }, [handleVerification]);
 
-  const upgradeToPremium = useCallback(() => {
-    const oneMonthFromNow = Date.now() + 30 * 24 * 60 * 60 * 1000;
-    setSubscription({
-      tier: "premium",
-      expiresAt: oneMonthFromNow,
-    });
-  }, []);
+  const restoreSubscription = useCallback(async () => {
+    setIapState((prev) => ({
+      ...prev,
+      restore: "pending",
+      lastError: undefined,
+      lastMessage: "Prüfe Käufe...",
+    }));
+    try {
+      const purchases = await subscriptionPurchaseService.restorePurchases();
+      if (purchases.length === 0) {
+        setIapState((prev) => ({
+          ...prev,
+          restore: "success",
+          lastMessage: "Keine Käufe gefunden",
+        }));
+        return;
+      }
+      await handleVerification(purchases[0], "restore");
+      setIapState((prev) => ({
+        ...prev,
+        restore: "success",
+        lastMessage: "Kauf wiederhergestellt",
+      }));
+    } catch (error) {
+      setIapState((prev) => ({
+        ...prev,
+        restore: "failed",
+        lastError: error instanceof Error ? error.message : String(error),
+      }));
+      throw error;
+    }
+  }, [handleVerification]);
 
-  const cancelPremium = useCallback(() => {
-    setSubscription({ tier: "free" });
-  }, []);
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrapPurchases = async () => {
+      try {
+        await subscriptionPurchaseService.initialize();
+        if (cancelled) return;
+        setIapState((prev) => ({
+          ...prev,
+          restore: prev.restore === "idle" ? "pending" : prev.restore,
+        }));
+        const purchases = await subscriptionPurchaseService.restorePurchases();
+        if (cancelled) return;
+        if (purchases.length > 0) {
+          await handleVerification(purchases[0], "restore");
+          if (cancelled) return;
+          setIapState((prev) => ({
+            ...prev,
+            restore: "success",
+          }));
+        } else {
+          setIapState((prev) => ({
+            ...prev,
+            restore: "success",
+          }));
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setIapState((prev) => ({
+          ...prev,
+          restore: prev.restore === "idle" ? "failed" : prev.restore,
+          lastError: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    };
+
+    bootstrapPurchases();
+
+    return () => {
+      cancelled = true;
+      subscriptionPurchaseService.disconnect();
+    };
+  }, [handleVerification]);
 
   const getRemainingMessages = useCallback((): number => {
-    resetDailyUsageIfNeeded();
-    if (limits.maxMessagesPerDay === Infinity) return Infinity;
-    return Math.max(0, limits.maxMessagesPerDay - usageStats.messagesToday);
-  }, [limits.maxMessagesPerDay, usageStats.messagesToday, resetDailyUsageIfNeeded]);
+    const fresh = ensureFreshUsageStats();
+    return getRemainingMessagesFromStats(fresh, limits);
+  }, [ensureFreshUsageStats, limits]);
 
   const getRemainingImages = useCallback((profileId: string): number => {
-    resetDailyUsageIfNeeded();
-    const used = usageStats.imagesUploadedToday[profileId] || 0;
-    return Math.max(0, limits.maxImagesPerProfilePerDay - used);
-  }, [limits.maxImagesPerProfilePerDay, usageStats.imagesUploadedToday, resetDailyUsageIfNeeded]);
+    const fresh = ensureFreshUsageStats();
+    return getRemainingImagesFromStats(fresh, limits, profileId);
+  }, [ensureFreshUsageStats, limits]);
+
+  useEffect(() => {
+    if (
+      subscription.tier === "premium" &&
+      subscription.expiresAt &&
+      subscription.expiresAt < Date.now()
+    ) {
+      setSubscription({
+        tier: "free",
+        status: "expired",
+        expiresAt: subscription.expiresAt,
+      });
+    }
+  }, [subscription]);
 
   return useMemo(() => ({
     subscription,
     limits,
     usageStats,
     isLoading,
-    isPremium: subscription.tier === "premium",
+    isPremium: hasActiveSubscription,
+    iapState,
     canSendMessage,
     canUploadImage,
     canCreateProfile,
     incrementMessageCount,
     incrementImageCount,
-    upgradeToPremium,
-    cancelPremium,
+    purchaseSubscription,
+    restoreSubscription,
     getRemainingMessages,
     getRemainingImages,
   }), [
@@ -212,13 +382,15 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     limits,
     usageStats,
     isLoading,
+    hasActiveSubscription,
+    iapState,
     canSendMessage,
     canUploadImage,
     canCreateProfile,
     incrementMessageCount,
     incrementImageCount,
-    upgradeToPremium,
-    cancelPremium,
+    purchaseSubscription,
+    restoreSubscription,
     getRemainingMessages,
     getRemainingImages,
   ]);
