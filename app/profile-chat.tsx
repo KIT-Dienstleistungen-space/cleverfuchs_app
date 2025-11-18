@@ -21,11 +21,18 @@ import {
   Image,
   Modal,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import { useMutation } from "@tanstack/react-query";
 import { useProfiles, Message } from "@/contexts/ProfileContext";
 import { useSubscription } from "@/contexts/SubscriptionContext";
+import {
+  buildChatRequest,
+  chatClient,
+  type ChatRequest,
+} from "@/lib/api/chat";
 
 export default function ProfileChatScreen() {
   const router = useRouter();
@@ -52,6 +59,11 @@ export default function ProfileChatScreen() {
   const [inputText, setInputText] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showChatList, setShowChatList] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+
+  const chatMutation = useMutation({
+    mutationFn: (payload: ChatRequest) => chatClient.sendMessage(payload),
+  });
 
   useEffect(() => {
     if (chatId) {
@@ -145,8 +157,12 @@ export default function ProfileChatScreen() {
   };
 
   const sendMessage = () => {
-    if (!inputText.trim() && !selectedImage) return;
-    if (!currentChatId) return;
+    const trimmedMessage = inputText.trim();
+    if ((!trimmedMessage && !selectedImage) || !currentChatId) return;
+
+    if (chatMutation.isPending) {
+      return;
+    }
 
     if (!canSendMessage()) {
       const remaining = getRemainingMessages();
@@ -163,29 +179,43 @@ export default function ProfileChatScreen() {
     const newMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: inputText.trim(),
+      content: trimmedMessage,
       imageUri: selectedImage || undefined,
       timestamp: Date.now(),
     };
 
+    const conversation = [...(currentChat?.messages ?? []), newMessage];
+
     addMessage(currentChatId, newMessage);
     incrementMessageCount();
 
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content:
-          "Ich bin ein Demo-Assistent. Das Backend wird später implementiert.",
-        timestamp: Date.now(),
-      };
-
-      addMessage(currentChatId, assistantMessage);
-    }, 500);
-
     setInputText("");
     setSelectedImage(null);
+    setChatError(null);
     scrollViewRef.current?.scrollToEnd({ animated: true });
+
+    const payload = buildChatRequest(id, currentChatId, conversation);
+
+    chatMutation.mutate(payload, {
+      onSuccess: (response) => {
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: response.message.content,
+          timestamp: Date.now(),
+        };
+
+        addMessage(currentChatId, assistantMessage);
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      },
+      onError: (error) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unbekannter Fehler beim Senden.";
+        setChatError(message);
+      },
+    });
   };
 
   return (
@@ -299,6 +329,25 @@ export default function ProfileChatScreen() {
           </ScrollView>
         )}
 
+        {chatMutation.isPending && (
+          <View style={styles.typingIndicator}>
+            <ActivityIndicator color="#FF9500" size="small" />
+            <Text style={styles.typingText}>Assistent schreibt ...</Text>
+          </View>
+        )}
+
+        {chatError && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>{chatError}</Text>
+            <TouchableOpacity
+              style={styles.errorBannerButton}
+              onPress={() => setChatError(null)}
+            >
+              <Text style={styles.errorBannerButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View
           style={[styles.inputContainer, { paddingBottom: insets.bottom + 16 }]}
         >
@@ -336,13 +385,19 @@ export default function ProfileChatScreen() {
             <TouchableOpacity
               style={[
                 styles.sendButton,
-                (!inputText.trim() && !selectedImage) &&
+                ((!inputText.trim() && !selectedImage) || chatMutation.isPending) &&
                   styles.sendButtonDisabled,
               ]}
               onPress={sendMessage}
-              disabled={!inputText.trim() && !selectedImage}
+              disabled={
+                (!inputText.trim() && !selectedImage) || chatMutation.isPending
+              }
             >
-              <Send size={22} color="#FFFFFF" strokeWidth={2.5} />
+              {chatMutation.isPending ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Send size={22} color="#FFFFFF" strokeWidth={2.5} />
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -749,5 +804,44 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "600",
     color: "#FFFFFF",
+  },
+  typingIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  typingText: {
+    fontSize: 14,
+    color: "#666666",
+  },
+  errorBanner: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#FFEFEF",
+    borderWidth: 1,
+    borderColor: "#FF3B30",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: "#B00020",
+    fontSize: 14,
+  },
+  errorBannerButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "#FF3B30",
+  },
+  errorBannerButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
   },
 });
