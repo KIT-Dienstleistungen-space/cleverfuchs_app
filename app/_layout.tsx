@@ -5,7 +5,8 @@ import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { ProfileProvider } from "@/contexts/ProfileContext";
 import { SubscriptionProvider } from "@/contexts/SubscriptionContext";
-import { trpc, trpcClient } from "@/lib/trpc";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { trpc, trpcReactClient } from "@/lib/trpc";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -18,6 +19,7 @@ function RootLayoutNav() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen name="elternbereich" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="kinderbereich" options={{ headerShown: true, title: "Kinderbereich" }} />
       <Stack.Screen name="scanner" options={{ headerShown: true, title: "QR-Code Scanner" }} />
       <Stack.Screen name="agb" options={{ headerShown: true, title: "AGB" }} />
@@ -38,15 +40,17 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+    <trpc.Provider client={trpcReactClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
-        <SubscriptionProvider>
-          <ProfileProvider>
-            <GestureHandlerRootView>
-              <RootLayoutNav />
-            </GestureHandlerRootView>
-          </ProfileProvider>
-        </SubscriptionProvider>
+        <AuthProvider>
+          <SubscriptionProvider>
+            <ProfileProvider>
+              <GestureHandlerRootView>
+                <RootLayoutNav />
+              </GestureHandlerRootView>
+            </ProfileProvider>
+          </SubscriptionProvider>
+        </AuthProvider>
       </QueryClientProvider>
     </trpc.Provider>
   );

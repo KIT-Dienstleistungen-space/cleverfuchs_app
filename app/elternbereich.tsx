@@ -1,5 +1,6 @@
 import { useRouter } from "expo-router";
-import { ChevronLeft, QrCode } from "lucide-react-native";
+import { ChevronLeft, QrCode, LogIn } from "lucide-react-native";
+import { useAuth } from "@/contexts/AuthContext";
 import React, { useState, useRef } from "react";
 import {
   StyleSheet,
@@ -22,6 +23,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 export default function ElternbereichScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [code, setCode] = useState<string[]>(["", "", "", "", "", "", "", ""]);
   const inputRefs = useRef<(TextInput | null)[]>([]);
   const translateX = useRef(new Animated.Value(0)).current;
@@ -114,7 +116,29 @@ export default function ElternbereichScreen() {
             </View>
           </View>
 
-          <Text style={styles.title}>Schön, dass Du da bist!</Text>
+          <Text style={styles.title}>
+            {user ? `Hallo, ${user.name}!` : "Schön, dass Du da bist!"}
+          </Text>
+
+          {!user && (
+            <TouchableOpacity
+              style={styles.loginButton}
+              onPress={() => router.push("/login")}
+            >
+              <LogIn size={20} color="#FF9500" strokeWidth={2} />
+              <Text style={styles.loginButtonText}>Als Elternteil anmelden</Text>
+            </TouchableOpacity>
+          )}
+
+          {user && (
+            <View style={styles.accessCodeCard}>
+              <Text style={styles.accessCodeLabel}>Dein Zugangscode für Kinder:</Text>
+              <Text style={styles.accessCode}>{user.accessCode}</Text>
+              <Text style={styles.accessCodeHint}>
+                Gib diesen Code ein, um mit dem Kinderbereich zu verbinden
+              </Text>
+            </View>
+          )}
 
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>QR-Code scannen</Text>
@@ -294,5 +318,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#999999",
     textDecorationLine: "underline",
+  },
+  loginButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  loginButtonText: {
+    fontSize: 16,
+    fontWeight: "500" as const,
+    color: "#FF9500",
+  },
+  accessCodeCard: {
+    width: "100%",
+    backgroundColor: "#FFF5E6",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 2,
+    borderColor: "#FF9500",
+  },
+  accessCodeLabel: {
+    fontSize: 14,
+    color: "#666666",
+    marginBottom: 8,
+  },
+  accessCode: {
+    fontSize: 32,
+    fontWeight: "600" as const,
+    color: "#FF9500",
+    textAlign: "center",
+    letterSpacing: 4,
+    marginBottom: 8,
+  },
+  accessCodeHint: {
+    fontSize: 12,
+    color: "#999999",
+    textAlign: "center",
   },
 });
