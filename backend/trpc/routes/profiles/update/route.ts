@@ -13,7 +13,7 @@ export const updateProfileProcedure = protectedProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
-    const profile = db.profiles.findById(input.profileId);
+    const profile = await db.profiles.findById(input.profileId);
 
     if (!profile) {
       throw new TRPCError({
@@ -29,7 +29,7 @@ export const updateProfileProcedure = protectedProcedure
       });
     }
 
-    const updated = db.profiles.update(input.profileId, {
+    const updated = await db.profiles.update(input.profileId, {
       name: input.name,
       birthYear: input.birthYear,
       languageLevel: input.languageLevel,

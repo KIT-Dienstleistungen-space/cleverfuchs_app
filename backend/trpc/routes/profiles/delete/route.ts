@@ -10,7 +10,7 @@ export const deleteProfileProcedure = protectedProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
-    const profile = db.profiles.findById(input.profileId);
+    const profile = await db.profiles.findById(input.profileId);
 
     if (!profile) {
       throw new TRPCError({
@@ -26,11 +26,11 @@ export const deleteProfileProcedure = protectedProcedure
       });
     }
 
-    const chats = db.chats.findByProfileId(input.profileId);
-    chats.forEach((chat) => {
-      db.chats.delete(chat.id);
-    });
+    const chats = await db.chats.findByProfileId(input.profileId);
+    for (const chat of chats) {
+      await db.chats.delete(chat.id);
+    }
 
-    db.profiles.delete(input.profileId);
+    await db.profiles.delete(input.profileId);
     return { success: true };
   });

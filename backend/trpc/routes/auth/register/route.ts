@@ -12,7 +12,7 @@ export const registerProcedure = publicProcedure
     })
   )
   .mutation(async ({ input }) => {
-    const existingUser = db.users.findByEmail(input.email);
+    const existingUser = await db.users.findByEmail(input.email);
 
     if (existingUser) {
       throw new TRPCError({
@@ -21,7 +21,7 @@ export const registerProcedure = publicProcedure
       });
     }
 
-    const user = db.users.create(input.email, input.password, input.name);
+    const user = await db.users.create(input.email, input.password, input.name);
 
     return {
       id: user.id,

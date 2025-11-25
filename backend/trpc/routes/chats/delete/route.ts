@@ -10,7 +10,7 @@ export const deleteChatProcedure = protectedProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
-    const chat = db.chats.findById(input.chatId);
+    const chat = await db.chats.findById(input.chatId);
 
     if (!chat) {
       throw new TRPCError({
@@ -26,6 +26,6 @@ export const deleteChatProcedure = protectedProcedure
       });
     }
 
-    db.chats.delete(input.chatId);
+    await db.chats.delete(input.chatId);
     return { success: true };
   });

@@ -10,7 +10,7 @@ export const createChatProcedure = protectedProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
-    const profile = db.profiles.findById(input.profileId);
+    const profile = await db.profiles.findById(input.profileId);
 
     if (!profile) {
       throw new TRPCError({
@@ -26,6 +26,6 @@ export const createChatProcedure = protectedProcedure
       });
     }
 
-    const chat = db.chats.create(ctx.userId, input.profileId);
+    const chat = await db.chats.create(ctx.userId, input.profileId);
     return chat;
   });

@@ -19,7 +19,7 @@ export const chatProcedure = protectedProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
-    const chat = db.chats.findById(input.chatId);
+    const chat = await db.chats.findById(input.chatId);
     
     if (!chat) {
       throw new TRPCError({
@@ -35,7 +35,7 @@ export const chatProcedure = protectedProcedure
       });
     }
 
-    const user = db.users.findById(ctx.userId);
+    const user = await db.users.findById(ctx.userId);
     if (!user) {
       throw new TRPCError({
         code: "NOT_FOUND",
@@ -43,7 +43,7 @@ export const chatProcedure = protectedProcedure
       });
     }
 
-    const stats = db.usageStats.get(ctx.userId);
+    const stats = await db.usageStats.get(ctx.userId);
     const isPremium = user.subscriptionTier === "premium";
 
     const maxMessages = isPremium ? Infinity : 20;
@@ -54,7 +54,7 @@ export const chatProcedure = protectedProcedure
       });
     }
 
-    const profile = db.profiles.findById(chat.profileId);
+    const profile = await db.profiles.findById(chat.profileId);
     if (!profile) {
       throw new TRPCError({
         code: "NOT_FOUND",
@@ -73,7 +73,7 @@ export const chatProcedure = protectedProcedure
         });
       }
       
-      db.usageStats.incrementImages(ctx.userId, profile.id);
+      await db.usageStats.incrementImages(ctx.userId, profile.id);
     }
 
     const userMessage: Message = {
@@ -85,9 +85,9 @@ export const chatProcedure = protectedProcedure
       timestamp: Date.now(),
     };
 
-    db.messages.add(input.chatId, userMessage);
+    await db.messages.add(input.chatId, userMessage);
 
-    const previousMessages = db.messages.findByChatId(input.chatId);
+    const previousMessages = await db.messages.findByChatId(input.chatId);
 
     let systemPrompt = "Du bist ein freundlicher KI-Assistent für Kinder. ";
     
@@ -154,15 +154,15 @@ export const chatProcedure = protectedProcedure
       timestamp: Date.now(),
     };
 
-    db.messages.add(input.chatId, assistantMessage);
+    await db.messages.add(input.chatId, assistantMessage);
 
     if (previousMessages.length === 0 && input.message.length > 0) {
-      db.chats.update(input.chatId, {
+      await db.chats.update(input.chatId, {
         title: input.message.slice(0, 30),
       });
     }
 
-    db.usageStats.incrementMessages(ctx.userId);
+    await db.usageStats.incrementMessages(ctx.userId);
 
     return {
       userMessage,

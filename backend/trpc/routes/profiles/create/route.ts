@@ -11,7 +11,7 @@ export const createProfileProcedure = protectedProcedure
     })
   )
   .mutation(async ({ ctx, input }) => {
-    const user = db.users.findById(ctx.userId);
+    const user = await db.users.findById(ctx.userId);
     if (!user) {
       throw new TRPCError({
         code: "NOT_FOUND",
@@ -19,7 +19,7 @@ export const createProfileProcedure = protectedProcedure
       });
     }
 
-    const currentProfiles = db.profiles.findByUserId(ctx.userId);
+    const currentProfiles = await db.profiles.findByUserId(ctx.userId);
     const isPremium = user.subscriptionTier === "premium";
     const maxProfiles = isPremium ? 10 : 1;
 
@@ -30,6 +30,6 @@ export const createProfileProcedure = protectedProcedure
       });
     }
 
-    const profile = db.profiles.create(ctx.userId, input.name, input.birthYear);
+    const profile = await db.profiles.create(ctx.userId, input.name, input.birthYear);
     return profile;
   });

@@ -10,7 +10,7 @@ export const verifyAccessCodeProcedure = publicProcedure
     })
   )
   .mutation(async ({ input }) => {
-    const user = db.users.findByAccessCode(input.accessCode);
+    const user = await db.users.findByAccessCode(input.accessCode);
 
     if (!user) {
       throw new TRPCError({

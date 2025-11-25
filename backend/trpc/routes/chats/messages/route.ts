@@ -10,7 +10,7 @@ export const getMessagesProcedure = protectedProcedure
     })
   )
   .query(async ({ ctx, input }) => {
-    const chat = db.chats.findById(input.chatId);
+    const chat = await db.chats.findById(input.chatId);
 
     if (!chat) {
       throw new TRPCError({
@@ -26,6 +26,6 @@ export const getMessagesProcedure = protectedProcedure
       });
     }
 
-    const messages = db.messages.findByChatId(input.chatId);
+    const messages = await db.messages.findByChatId(input.chatId);
     return messages;
   });

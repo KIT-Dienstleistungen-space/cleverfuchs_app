@@ -3,29 +3,35 @@ import { z } from "zod";
 import { db } from "@/backend/db/users";
 import { TRPCError } from "@trpc/server";
 
-export const getChatsProcedure = protectedProcedure
+export const getChatHistoryForParentProcedure = protectedProcedure
   .input(
     z.object({
-      profileId: z.string(),
+      chatId: z.string(),
     })
   )
   .query(async ({ ctx, input }) => {
-    const profile = await db.profiles.findById(input.profileId);
+    const chat = await db.chats.findById(input.chatId);
 
-    if (!profile) {
+    if (!chat) {
       throw new TRPCError({
         code: "NOT_FOUND",
-        message: "Profil nicht gefunden",
+        message: "Chat nicht gefunden",
       });
     }
 
-    if (profile.userId !== ctx.userId) {
+    if (chat.userId !== ctx.userId) {
       throw new TRPCError({
         code: "UNAUTHORIZED",
         message: "Zugriff verweigert",
       });
     }
 
-    const chats = await db.chats.findByProfileId(input.profileId);
-    return chats;
+    const messages = await db.messages.findByChatId(input.chatId);
+    const profile = await db.profiles.findById(chat.profileId);
+
+    return {
+      chat,
+      profile,
+      messages,
+    };
   });

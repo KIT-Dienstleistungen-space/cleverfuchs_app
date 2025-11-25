@@ -11,7 +11,7 @@ export const loginProcedure = publicProcedure
     })
   )
   .mutation(async ({ input }) => {
-    const user = db.users.findByEmail(input.email);
+    const user = await db.users.findByEmail(input.email);
 
     if (!user || user.password !== input.password) {
       throw new TRPCError({

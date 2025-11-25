@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { ChevronLeft, QrCode, LogIn } from "lucide-react-native";
+import { ChevronLeft, QrCode, LogIn, BarChart3 } from "lucide-react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import React, { useState, useRef } from "react";
 import {
@@ -131,13 +131,23 @@ export default function ElternbereichScreen() {
           )}
 
           {user && (
-            <View style={styles.accessCodeCard}>
-              <Text style={styles.accessCodeLabel}>Dein Zugangscode für Kinder:</Text>
-              <Text style={styles.accessCode}>{user.accessCode}</Text>
-              <Text style={styles.accessCodeHint}>
-                Gib diesen Code ein, um mit dem Kinderbereich zu verbinden
-              </Text>
-            </View>
+            <>
+              <View style={styles.accessCodeCard}>
+                <Text style={styles.accessCodeLabel}>Dein Zugangscode für Kinder:</Text>
+                <Text style={styles.accessCode}>{user.accessCode}</Text>
+                <Text style={styles.accessCodeHint}>
+                  Gib diesen Code ein, um mit dem Kinderbereich zu verbinden
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.dashboardButton}
+                onPress={() => router.push("/parent-dashboard")}
+              >
+                <BarChart3 size={20} color="#4CAF50" strokeWidth={2} />
+                <Text style={styles.dashboardButtonText}>Statistiken & Übersicht</Text>
+              </TouchableOpacity>
+            </>
           )}
 
           <View style={styles.card}>
@@ -366,5 +376,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#999999",
     textAlign: "center",
+  },
+  dashboardButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    borderWidth: 2,
+    borderColor: "#4CAF50",
+  },
+  dashboardButtonText: {
+    fontSize: 16,
+    fontWeight: "500" as const,
+    color: "#4CAF50",
   },
 });

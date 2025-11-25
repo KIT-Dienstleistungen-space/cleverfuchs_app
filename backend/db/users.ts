@@ -1,3 +1,5 @@
+import { getDatabase } from "./database";
+
 export interface User {
   id: string;
   email: string;
@@ -44,20 +46,31 @@ export interface UsageStats {
   lastResetDate: string;
 }
 
-const users = new Map<string, User>();
-const profiles = new Map<string, Profile>();
-const chats = new Map<string, Chat>();
-const messages = new Map<string, Message[]>();
-const usageStats = new Map<string, UsageStats>();
+export interface Purchase {
+  id: string;
+  userId: string;
+  productId: string;
+  purchaseDate: number;
+  expiryDate?: number;
+  transactionId?: string;
+  platform: string;
+  status: string;
+}
 
 function generateAccessCode(): string {
   return Math.random().toString().slice(2, 10);
 }
 
+function generateId(): string {
+  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+}
+
 export const db = {
   users: {
-    create: (email: string, password: string, name: string): User => {
-      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    create: async (email: string, password: string, name: string): Promise<User> => {
+      const database = getDatabase();
+      const id = generateId();
+      const accessCode = generateAccessCode();
       const user: User = {
         id,
         email: email.toLowerCase(),
@@ -65,157 +78,320 @@ export const db = {
         name,
         subscriptionTier: "free",
         createdAt: Date.now(),
-        accessCode: generateAccessCode(),
+        accessCode,
       };
-      users.set(id, user);
+
+      await database.runAsync(
+        "INSERT INTO users (id, email, password, name, subscriptionTier, createdAt, accessCode) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        id, email.toLowerCase(), password, name, "free", Date.now(), accessCode
+      );
+
       return user;
     },
 
-    findByEmail: (email: string): User | undefined => {
-      return Array.from(users.values()).find(
-        (u) => u.email === email.toLowerCase()
+    findByEmail: async (email: string): Promise<User | undefined> => {
+      const database = getDatabase();
+      const result = await database.getFirstAsync<User>(
+        "SELECT * FROM users WHERE email = ?",
+        email.toLowerCase()
       );
+      return result || undefined;
     },
 
-    findById: (id: string): User | undefined => {
-      return users.get(id);
-    },
-
-    findByAccessCode: (accessCode: string): User | undefined => {
-      return Array.from(users.values()).find(
-        (u) => u.accessCode === accessCode
+    findById: async (id: string): Promise<User | undefined> => {
+      const database = getDatabase();
+      const result = await database.getFirstAsync<User>(
+        "SELECT * FROM users WHERE id = ?",
+        id
       );
+      return result || undefined;
     },
 
-    update: (id: string, updates: Partial<User>): User | undefined => {
-      const user = users.get(id);
+    findByAccessCode: async (accessCode: string): Promise<User | undefined> => {
+      const database = getDatabase();
+      const result = await database.getFirstAsync<User>(
+        "SELECT * FROM users WHERE accessCode = ?",
+        accessCode
+      );
+      return result || undefined;
+    },
+
+    update: async (id: string, updates: Partial<User>): Promise<User | undefined> => {
+      const database = getDatabase();
+      const user = await db.users.findById(id);
       if (!user) return undefined;
+
       const updated = { ...user, ...updates };
-      users.set(id, updated);
+      await database.runAsync(
+        "UPDATE users SET email = ?, name = ?, subscriptionTier = ?, subscriptionExpiresAt = ? WHERE id = ?",
+        updated.email, updated.name, updated.subscriptionTier, updated.subscriptionExpiresAt || null, id
+      );
+
       return updated;
     },
   },
 
   profiles: {
-    create: (userId: string, name: string, birthYear: string): Profile => {
-      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    create: async (userId: string, name: string, birthYear: string): Promise<Profile> => {
+      const database = getDatabase();
+      const id = generateId();
+      const now = Date.now();
       const profile: Profile = {
         id,
         userId,
         name,
         birthYear,
         languageLevel: "beginner",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
-      profiles.set(id, profile);
+
+      await database.runAsync(
+        "INSERT INTO profiles (id, userId, name, birthYear, languageLevel, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        id, userId, name, birthYear, "beginner", now, now
+      );
+
       return profile;
     },
 
-    findByUserId: (userId: string): Profile[] => {
-      return Array.from(profiles.values()).filter((p) => p.userId === userId);
+    findByUserId: async (userId: string): Promise<Profile[]> => {
+      const database = getDatabase();
+      const results = await database.getAllAsync<Profile>(
+        "SELECT * FROM profiles WHERE userId = ? ORDER BY createdAt DESC",
+        userId
+      );
+      return results;
     },
 
-    findById: (id: string): Profile | undefined => {
-      return profiles.get(id);
+    findById: async (id: string): Promise<Profile | undefined> => {
+      const database = getDatabase();
+      const result = await database.getFirstAsync<Profile>(
+        "SELECT * FROM profiles WHERE id = ?",
+        id
+      );
+      return result || undefined;
     },
 
-    update: (id: string, updates: Partial<Profile>): Profile | undefined => {
-      const profile = profiles.get(id);
+    update: async (id: string, updates: Partial<Profile>): Promise<Profile | undefined> => {
+      const database = getDatabase();
+      const profile = await db.profiles.findById(id);
       if (!profile) return undefined;
+
       const updated = { ...profile, ...updates, updatedAt: Date.now() };
-      profiles.set(id, updated);
+      await database.runAsync(
+        "UPDATE profiles SET name = ?, birthYear = ?, languageLevel = ?, updatedAt = ? WHERE id = ?",
+        updated.name, updated.birthYear, updated.languageLevel, updated.updatedAt, id
+      );
+
       return updated;
     },
 
-    delete: (id: string): boolean => {
-      return profiles.delete(id);
+    delete: async (id: string): Promise<boolean> => {
+      const database = getDatabase();
+      await database.runAsync("DELETE FROM profiles WHERE id = ?", id);
+      return true;
     },
   },
 
   chats: {
-    create: (userId: string, profileId: string): Chat => {
-      const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    create: async (userId: string, profileId: string): Promise<Chat> => {
+      const database = getDatabase();
+      const id = generateId();
+      const now = Date.now();
       const chat: Chat = {
         id,
         profileId,
         userId,
         title: "Neuer Chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
-      chats.set(id, chat);
-      messages.set(id, []);
+
+      await database.runAsync(
+        "INSERT INTO chats (id, profileId, userId, title, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
+        id, profileId, userId, "Neuer Chat", now, now
+      );
+
       return chat;
     },
 
-    findByProfileId: (profileId: string): Chat[] => {
-      return Array.from(chats.values()).filter((c) => c.profileId === profileId);
+    findByProfileId: async (profileId: string): Promise<Chat[]> => {
+      const database = getDatabase();
+      const results = await database.getAllAsync<Chat>(
+        "SELECT * FROM chats WHERE profileId = ? ORDER BY updatedAt DESC",
+        profileId
+      );
+      return results;
     },
 
-    findById: (id: string): Chat | undefined => {
-      return chats.get(id);
+    findByUserId: async (userId: string): Promise<Chat[]> => {
+      const database = getDatabase();
+      const results = await database.getAllAsync<Chat>(
+        "SELECT * FROM chats WHERE userId = ? ORDER BY updatedAt DESC",
+        userId
+      );
+      return results;
     },
 
-    update: (id: string, updates: Partial<Chat>): Chat | undefined => {
-      const chat = chats.get(id);
+    findById: async (id: string): Promise<Chat | undefined> => {
+      const database = getDatabase();
+      const result = await database.getFirstAsync<Chat>(
+        "SELECT * FROM chats WHERE id = ?",
+        id
+      );
+      return result || undefined;
+    },
+
+    update: async (id: string, updates: Partial<Chat>): Promise<Chat | undefined> => {
+      const database = getDatabase();
+      const chat = await db.chats.findById(id);
       if (!chat) return undefined;
+
       const updated = { ...chat, ...updates, updatedAt: Date.now() };
-      chats.set(id, updated);
+      await database.runAsync(
+        "UPDATE chats SET title = ?, updatedAt = ? WHERE id = ?",
+        updated.title, updated.updatedAt, id
+      );
+
       return updated;
     },
 
-    delete: (id: string): boolean => {
-      messages.delete(id);
-      return chats.delete(id);
+    delete: async (id: string): Promise<boolean> => {
+      const database = getDatabase();
+      await database.runAsync("DELETE FROM messages WHERE chatId = ?", id);
+      await database.runAsync("DELETE FROM chats WHERE id = ?", id);
+      return true;
     },
   },
 
   messages: {
-    add: (chatId: string, message: Message): void => {
-      const chatMessages = messages.get(chatId) || [];
-      chatMessages.push(message);
-      messages.set(chatId, chatMessages);
+    add: async (chatId: string, message: Message): Promise<void> => {
+      const database = getDatabase();
+      await database.runAsync(
+        "INSERT INTO messages (id, chatId, role, content, imageUri, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+        message.id, chatId, message.role, message.content, message.imageUri || null, message.timestamp
+      );
+
+      await database.runAsync(
+        "UPDATE chats SET updatedAt = ? WHERE id = ?",
+        Date.now(), chatId
+      );
     },
 
-    findByChatId: (chatId: string): Message[] => {
-      return messages.get(chatId) || [];
+    findByChatId: async (chatId: string): Promise<Message[]> => {
+      const database = getDatabase();
+      const results = await database.getAllAsync<Message>(
+        "SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC",
+        chatId
+      );
+      return results;
     },
 
-    deleteAllForChat: (chatId: string): void => {
-      messages.delete(chatId);
+    deleteAllForChat: async (chatId: string): Promise<void> => {
+      const database = getDatabase();
+      await database.runAsync("DELETE FROM messages WHERE chatId = ?", chatId);
     },
   },
 
   usageStats: {
-    get: (userId: string): UsageStats => {
+    get: async (userId: string): Promise<UsageStats> => {
+      const database = getDatabase();
       const today = new Date().toDateString();
-      let stats = usageStats.get(userId);
 
-      if (!stats || stats.lastResetDate !== today) {
-        stats = {
+      const result = await database.getFirstAsync<{
+        userId: string;
+        messagesToday: number;
+        lastResetDate: string;
+      }>("SELECT * FROM usage_stats WHERE userId = ?", userId);
+
+      if (!result || result.lastResetDate !== today) {
+        const stats: UsageStats = {
           userId,
           messagesToday: 0,
           imagesUploadedToday: {},
           lastResetDate: today,
         };
-        usageStats.set(userId, stats);
+
+        await database.runAsync(
+          "INSERT OR REPLACE INTO usage_stats (userId, messagesToday, lastResetDate) VALUES (?, ?, ?)",
+          userId, 0, today
+        );
+
+        return stats;
       }
 
-      return stats;
+      const imageResults = await database.getAllAsync<{
+        profileId: string;
+        count: number;
+      }>("SELECT profileId, count FROM image_usage WHERE userId = ? AND date = ?", userId, today);
+
+      const imagesUploadedToday: { [profileId: string]: number } = {};
+      imageResults.forEach(row => {
+        imagesUploadedToday[row.profileId] = row.count;
+      });
+
+      return {
+        userId: result.userId,
+        messagesToday: result.messagesToday,
+        imagesUploadedToday,
+        lastResetDate: result.lastResetDate,
+      };
     },
 
-    incrementMessages: (userId: string): void => {
-      const stats = db.usageStats.get(userId);
-      stats.messagesToday += 1;
-      usageStats.set(userId, stats);
+    incrementMessages: async (userId: string): Promise<void> => {
+      const database = getDatabase();
+      const stats = await db.usageStats.get(userId);
+      await database.runAsync(
+        "UPDATE usage_stats SET messagesToday = ? WHERE userId = ?",
+        stats.messagesToday + 1, userId
+      );
     },
 
-    incrementImages: (userId: string, profileId: string): void => {
-      const stats = db.usageStats.get(userId);
-      stats.imagesUploadedToday[profileId] =
-        (stats.imagesUploadedToday[profileId] || 0) + 1;
-      usageStats.set(userId, stats);
+    incrementImages: async (userId: string, profileId: string): Promise<void> => {
+      const database = getDatabase();
+      const today = new Date().toDateString();
+      
+      await database.runAsync(
+        "INSERT INTO image_usage (userId, profileId, date, count) VALUES (?, ?, ?, 1) ON CONFLICT(userId, profileId, date) DO UPDATE SET count = count + 1",
+        userId, profileId, today
+      );
+    },
+  },
+
+  purchases: {
+    create: async (purchase: Purchase): Promise<void> => {
+      const database = getDatabase();
+      await database.runAsync(
+        "INSERT INTO purchases (id, userId, productId, purchaseDate, expiryDate, transactionId, platform, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        purchase.id, purchase.userId, purchase.productId, purchase.purchaseDate, 
+        purchase.expiryDate || null, purchase.transactionId || null, purchase.platform, purchase.status
+      );
+    },
+
+    findByUserId: async (userId: string): Promise<Purchase[]> => {
+      const database = getDatabase();
+      const results = await database.getAllAsync<Purchase>(
+        "SELECT * FROM purchases WHERE userId = ? ORDER BY purchaseDate DESC",
+        userId
+      );
+      return results;
+    },
+
+    findActivePurchase: async (userId: string, productId: string): Promise<Purchase | undefined> => {
+      const database = getDatabase();
+      const result = await database.getFirstAsync<Purchase>(
+        "SELECT * FROM purchases WHERE userId = ? AND productId = ? AND status = 'active' AND (expiryDate IS NULL OR expiryDate > ?) ORDER BY purchaseDate DESC LIMIT 1",
+        userId, productId, Date.now()
+      );
+      return result || undefined;
+    },
+
+    updateStatus: async (id: string, status: string): Promise<void> => {
+      const database = getDatabase();
+      await database.runAsync(
+        "UPDATE purchases SET status = ? WHERE id = ?",
+        status, id
+      );
     },
   },
 };

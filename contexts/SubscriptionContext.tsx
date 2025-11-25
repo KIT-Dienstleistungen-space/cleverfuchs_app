@@ -1,6 +1,9 @@
 import createContextHook from "@nkzw/create-context-hook";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { trpc } from "@/lib/trpc";
+import { paymentService } from "@/lib/payment-service";
+import { useAuth } from "./AuthContext";
 
 export type SubscriptionTier = "free" | "premium";
 
@@ -37,6 +40,7 @@ const PREMIUM_LIMITS: SubscriptionLimits = {
 };
 
 export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
+  const { isAuthenticated } = useAuth();
   const [subscription, setSubscription] = useState<Subscription>({ tier: "free" });
   const [usageStats, setUsageStats] = useState<UsageStats>({
     messagesToday: 0,
@@ -44,6 +48,17 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     lastResetDate: new Date().toDateString(),
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isPurchasing, setIsPurchasing] = useState(false);
+
+  const subscriptionStatusQuery = trpc.subscription.status.useQuery(
+    undefined,
+    { enabled: isAuthenticated, refetchInterval: 60000 }
+  );
+
+  const usageStatsQuery = trpc.user.usage.useQuery(
+    undefined,
+    { enabled: isAuthenticated, refetchInterval: 30000 }
+  );
 
   const limits = useMemo(
     () => (subscription.tier === "premium" ? PREMIUM_LIMITS : FREE_LIMITS),
@@ -67,6 +82,31 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
   }, [usageStats]);
 
   useEffect(() => {
+    if (subscriptionStatusQuery.data) {
+      setSubscription({
+        tier: subscriptionStatusQuery.data.tier,
+        expiresAt: subscriptionStatusQuery.data.expiresAt,
+      });
+    }
+  }, [subscriptionStatusQuery.data]);
+
+  useEffect(() => {
+    if (usageStatsQuery.data) {
+      setUsageStats({
+        messagesToday: usageStatsQuery.data.messagesToday,
+        imagesUploadedToday: usageStatsQuery.data.imagesUploadedToday,
+        lastResetDate: new Date().toDateString(),
+      });
+    }
+  }, [usageStatsQuery.data]);
+
+  useEffect(() => {
+    if (!subscriptionStatusQuery.isLoading && !usageStatsQuery.isLoading) {
+      setIsLoading(false);
+    }
+  }, [subscriptionStatusQuery.isLoading, usageStatsQuery.isLoading]);
+
+  useEffect(() => {
     const loadData = async () => {
       try {
         const [subData, usageData] = await Promise.all([
@@ -74,7 +114,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
           AsyncStorage.getItem(USAGE_STATS_KEY),
         ]);
 
-        if (subData) {
+        if (subData && !isAuthenticated) {
           const parsed: Subscription = JSON.parse(subData);
           if (parsed.tier === "premium" && parsed.expiresAt && parsed.expiresAt < Date.now()) {
             setSubscription({ tier: "free" });
@@ -83,7 +123,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
           }
         }
 
-        if (usageData) {
+        if (usageData && !isAuthenticated) {
           const parsed: UsageStats = JSON.parse(usageData);
           const today = new Date().toDateString();
           
@@ -100,12 +140,14 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
       } catch (error) {
         console.error("Error loading subscription data:", error);
       } finally {
-        setIsLoading(false);
+        if (!isAuthenticated) {
+          setIsLoading(false);
+        }
       }
     };
 
     loadData();
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!isLoading) {
@@ -168,17 +210,40 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     }));
   }, [resetDailyUsageIfNeeded]);
 
-  const upgradeToPremium = useCallback(() => {
-    const oneMonthFromNow = Date.now() + 30 * 24 * 60 * 60 * 1000;
-    setSubscription({
-      tier: "premium",
-      expiresAt: oneMonthFromNow,
-    });
-  }, []);
+  const upgradeToPremium = useCallback(async () => {
+    try {
+      setIsPurchasing(true);
+      await paymentService.initializePurchases();
+      const result = await paymentService.purchasePremium();
 
-  const cancelPremium = useCallback(() => {
-    setSubscription({ tier: "free" });
-  }, []);
+      if (result.success) {
+        await subscriptionStatusQuery.refetch();
+        await usageStatsQuery.refetch();
+        return { success: true };
+      } else {
+        return { success: false, error: result.error };
+      }
+    } catch (error: any) {
+      console.error("Upgrade error:", error);
+      return { success: false, error: error.message || "Upgrade fehlgeschlagen" };
+    } finally {
+      setIsPurchasing(false);
+    }
+  }, [subscriptionStatusQuery, usageStatsQuery]);
+
+  const cancelPremium = useCallback(async () => {
+    try {
+      const success = await paymentService.cancelSubscription();
+      if (success) {
+        await subscriptionStatusQuery.refetch();
+        setSubscription({ tier: "free" });
+      }
+      return success;
+    } catch (error) {
+      console.error("Cancel error:", error);
+      return false;
+    }
+  }, [subscriptionStatusQuery]);
 
   const getRemainingMessages = useCallback((): number => {
     resetDailyUsageIfNeeded();
@@ -197,6 +262,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     limits,
     usageStats,
     isLoading,
+    isPurchasing,
     isPremium: subscription.tier === "premium",
     canSendMessage,
     canUploadImage,
@@ -212,6 +278,7 @@ export const [SubscriptionProvider, useSubscription] = createContextHook(() => {
     limits,
     usageStats,
     isLoading,
+    isPurchasing,
     canSendMessage,
     canUploadImage,
     canCreateProfile,

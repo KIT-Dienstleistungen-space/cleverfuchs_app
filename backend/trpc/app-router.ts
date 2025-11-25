@@ -13,6 +13,12 @@ import { getMessagesProcedure } from "./routes/chats/messages/route";
 import { deleteChatProcedure } from "./routes/chats/delete/route";
 import { chatProcedure } from "./routes/chat/send/route";
 import { getUsageStatsProcedure } from "./routes/user/usage/route";
+import { verifyPurchaseProcedure } from "./routes/subscription/verify/route";
+import { getSubscriptionStatusProcedure } from "./routes/subscription/status/route";
+import { cancelSubscriptionProcedure } from "./routes/subscription/cancel/route";
+import { getAllChatsForParentProcedure } from "./routes/parent/all-chats/route";
+import { getParentStatisticsProcedure } from "./routes/parent/statistics/route";
+import { getChatHistoryForParentProcedure } from "./routes/parent/chat-history/route";
 
 export const appRouter = createTRPCRouter({
   example: createTRPCRouter({
@@ -40,6 +46,16 @@ export const appRouter = createTRPCRouter({
   }),
   user: createTRPCRouter({
     usage: getUsageStatsProcedure,
+  }),
+  subscription: createTRPCRouter({
+    verify: verifyPurchaseProcedure,
+    status: getSubscriptionStatusProcedure,
+    cancel: cancelSubscriptionProcedure,
+  }),
+  parent: createTRPCRouter({
+    allChats: getAllChatsForParentProcedure,
+    statistics: getParentStatisticsProcedure,
+    chatHistory: getChatHistoryForParentProcedure,
   }),
 });
 
